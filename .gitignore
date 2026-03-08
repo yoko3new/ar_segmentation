@@ -1,0 +1,12 @@
+assets/
+checkpoints/
+wandb/
+logs/
+__pycache__/
+*.pyc
+*.pth
+*.pt
+*.h5
+*.zarr
+*.tar.gz
+*.csv
