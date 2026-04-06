@@ -455,3 +455,50 @@ class UNetDecoder(nn.Module):
             x = b["conv"](x)
 
         return x
+
+class LightweightSegModel(nn.Module):
+    """Lightweight segmentation baseline using MobileNetV3 + DeepLabV3."""
+
+    def __init__(self, in_chans: int = 13, out_chans: int = 1):
+        super().__init__()
+        from torchvision.models.segmentation import deeplabv3_mobilenet_v3_large
+
+        self.model = deeplabv3_mobilenet_v3_large(weights="DEFAULT")
+
+        # Replace BatchNorm with GroupNorm for batch_size=1
+        self._replace_batchnorm(self.model)
+
+        # Replace first conv: 3 channels -> in_chans
+        old_conv = self.model.backbone["0"][0]
+        self.model.backbone["0"][0] = nn.Conv2d(
+            in_chans, old_conv.out_channels,
+            kernel_size=old_conv.kernel_size,
+            stride=old_conv.stride,
+            padding=old_conv.padding,
+            bias=False,
+        )
+
+        # Replace final classifier: 21 classes -> out_chans
+        in_features = self.model.classifier[-1].in_channels
+        self.model.classifier[-1] = nn.Conv2d(in_features, out_chans, kernel_size=1)
+
+        self.model.aux_classifier = None
+
+    def _replace_batchnorm(self, module):
+        for name, child in module.named_children():
+            if isinstance(child, nn.BatchNorm2d):
+                num_channels = child.num_features
+                num_groups = min(32, num_channels)
+                while num_channels % num_groups != 0:
+                    num_groups -= 1
+                setattr(module, name, nn.GroupNorm(num_groups, num_channels))
+            else:
+                self._replace_batchnorm(child)
+
+    def forward(self, batch: dict) -> torch.Tensor:
+        x = batch["ts"]
+        if x.ndim == 5:
+            x = x[:, :, -1, :, :]
+
+        out = self.model(x)["out"]
+        return out

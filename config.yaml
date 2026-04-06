@@ -1,0 +1,410 @@
+_wandb:
+    value:
+        cli_version: 0.25.0
+        e:
+            a9rkncohcgu33rplo0jknbhpz2lajkvb:
+                args:
+                    - --gpu
+                    - --wandb
+                codePath: finetune.py
+                codePathLocal: finetune.py
+                cpu_count: 96
+                cpu_count_logical: 96
+                cudaVersion: "13.0"
+                disk:
+                    /:
+                        total: "540873715712"
+                        used: "16833613824"
+                email: kyang30@student.gsu.edu
+                executable: /home/x-kyang10/.conda/envs/surya/bin/python
+                git:
+                    commit: 8f6071511e3168898f4d0c509884ae3a0b7d39f8
+                    remote: git@github.com:yoko3new/ar_segmentation.git
+                gpu: NVIDIA H100 80GB HBM3
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-2b181293-f4c2-908a-22c6-666d75c6055b
+                host: h006.anvil.rcac.purdue.edu
+                memory:
+                    total: "1081747435520"
+                os: Linux-4.18.0-553.81.1.el8_10.x86_64-x86_64-with-glibc2.28
+                program: /anvil/scratch/x-kyang10/Surya/downstream_examples/ar_segmentation/finetune.py
+                python: CPython 3.11.14
+                root: /anvil/scratch/x-kyang10/Surya/downstream_examples/ar_segmentation
+                slurm:
+                    cluster_name: anvil
+                    conf: /var/spool/slurm/conf-cache/slurm.conf
+                    cpus_on_node: "4"
+                    cpus_per_task: "4"
+                    gpus_on_node: "1"
+                    gtids: "0"
+                    job_account: cis251356-ai
+                    job_cpus_per_node: "4"
+                    job_end_time: "1773165737"
+                    job_gid: "7009156"
+                    job_gpus: "2"
+                    job_id: "15622198"
+                    job_name: ar_seg_daily
+                    job_nodelist: h006
+                    job_num_nodes: "1"
+                    job_partition: ai
+                    job_qos: ai
+                    job_start_time: "1773093737"
+                    job_uid: "8011989"
+                    job_user: x-kyang10
+                    jobid: "15622198"
+                    localid: "0"
+                    mem_per_node: "65536"
+                    nnodes: "1"
+                    nodeid: "0"
+                    nodelist: h006
+                    oom_kill_step: "0"
+                    prio_process: "0"
+                    procid: "0"
+                    script_context: prolog_task
+                    submit_dir: /anvil/scratch/x-kyang10/Surya/downstream_examples/ar_segmentation
+                    submit_host: login02.anvil.rcac.purdue.edu
+                    task_pid: "2869897"
+                    tasks_per_node: "1"
+                    topology_addr: ibsw[23-32].ibsw35.h006
+                    topology_addr_pattern: switch.switch.node
+                    tres_per_task: cpu=4
+                startedAt: "2026-03-09T22:02:37.592405Z"
+                writerId: a9rkncohcgu33rplo0jknbhpz2lajkvb
+        m: []
+        python_version: 3.11.14
+        t:
+            "1":
+                - 1
+                - 11
+                - 41
+                - 49
+                - 63
+                - 71
+                - 98
+            "2":
+                - 1
+                - 11
+                - 41
+                - 49
+                - 63
+                - 71
+                - 98
+            "3":
+                - 2
+                - 3
+                - 13
+                - 16
+                - 61
+            "4": 3.11.14
+            "5": 0.25.0
+            "6": 5.2.0
+            "12": 0.25.0
+            "13": linux-x86_64
+adapter:
+    value:
+        channels:
+            - aia94
+            - aia131
+            - aia171
+        use_channel_adapter: false
+data:
+    value:
+        ar_index_train:
+            - ./assets/ar_index_12min.csv
+        ar_index_valid:
+            - ./assets/ar_index_12min.csv
+        ar_mask_base_dir: ./assets/surya-bench-ar-segmentation
+        batch_size: 1
+        channels:
+            - aia94
+            - aia131
+            - aia171
+            - aia193
+            - aia211
+            - aia304
+            - aia335
+            - aia1600
+            - hmi_m
+            - hmi_bx
+            - hmi_by
+            - hmi_bz
+            - hmi_v
+        daily_only: true
+        num_data_workers: 4
+        prefetch_factor: 2
+        scalers:
+            aia94:
+                base: surya.datasets.transformations
+                class: StandardScaler
+                count: 33571209216
+                epsilon: 1e-08
+                is_fitted: "true"
+                max: 5.104914665222168
+                mean: 0.007682247087359428
+                min: 0
+                sl_scale_factor: 0.01
+                ssq: 8.766571e+06
+                std: 0.014216765761375427
+                sum: 2.5790232e+08
+            aia131:
+                base: surya.datasets.transformations
+                class: StandardScaler
+                count: 33571209216
+                epsilon: 1e-08
+                is_fitted: "true"
+                max: 4.642958164215088
+                mean: 0.03911230340600014
+                min: 0
+                sl_scale_factor: 0.01
+                ssq: 1.53411952e+08
+                std: 0.05513598397374153
+                sum: 1.313047296e+09
+            aia171:
+                base: surya.datasets.transformations
+                class: StandardScaler
+                count: 33571209216
+                epsilon: 1e-08
+                is_fitted: "true"
+                max: 4.716078758239746
+                mean: 0.6208767294883728
+                min: 0
+                sl_scale_factor: 0.01
+                ssq: 2.1844160512e+10
+                std: 0.5149681568145752
+                sum: 2.0843583488e+10
+            aia193:
+                base: surya.datasets.transformations
+                class: StandardScaler
+                count: 33571209216
+                epsilon: 1e-08
+                is_fitted: "true"
+                max: 5.091572284698486
+                mean: 0.6960407495498657
+                min: 0
+                sl_scale_factor: 0.01
+                ssq: 2.7141281792e+10
+                std: 0.569206714630127
+                sum: 2.3366930432e+10
+            aia211:
+                base: surya.datasets.transformations
+                class: StandardScaler
+                count: 33571209216
+                epsilon: 1e-08
+                is_fitted: "true"
+                max: 5.104914665222168
+                mean: 0.3032558560371399
+                min: 0
+                sl_scale_factor: 0.01
+                ssq: 6.964888576e+09
+                std: 0.3398558497428894
+                sum: 1.0180665344e+10
+            aia304:
+                base: surya.datasets.transformations
+                class: StandardScaler
+                count: 33571209216
+                epsilon: 1e-08
+                is_fitted: "true"
+                max: 5.104914665222168
+                mean: 0.24362024664878845
+                min: 0
+                sl_scale_factor: 0.01
+                ssq: 3.97718016e+09
+                std: 0.24314379692077637
+                sum: 8.178626048e+09
+            aia335:
+                base: surya.datasets.transformations
+                class: StandardScaler
+                count: 33571209216
+                epsilon: 1e-08
+                is_fitted: "true"
+                max: 5.104914665222168
+                mean: 0.030005566775798798
+                min: 0
+                sl_scale_factor: 0.01
+                ssq: 1.01809864e+08
+                std: 0.04617703706026077
+                sum: 1.007323136e+09
+            aia1600:
+                base: surya.datasets.transformations
+                class: StandardScaler
+                count: 33571209216
+                epsilon: 1e-08
+                is_fitted: "true"
+                max: 5.104914665222168
+                mean: 0.27640828490257263
+                min: 0
+                sl_scale_factor: 0.01
+                ssq: 5.027391488e+09
+                std: 0.2708348035812378
+                sum: 9.27936e+09
+            hmi_bx:
+                base: surya.datasets.transformations
+                class: StandardScaler
+                count: 33571209216
+                epsilon: 1e-08
+                is_fitted: "true"
+                max: 3.737321376800537
+                mean: 0.0010142404353246093
+                min: -3.7792491912841797
+                sl_scale_factor: 0.01
+                ssq: 3.866785536e+09
+                std: 0.3393826484680176
+                sum: 3.4049276e+07
+            hmi_by:
+                base: surya.datasets.transformations
+                class: StandardScaler
+                count: 33571209216
+                epsilon: 1e-08
+                is_fitted: "true"
+                max: 3.6676809787750244
+                mean: 0.0008488616440445185
+                min: -3.9032106399536133
+                sl_scale_factor: 0.01
+                ssq: 3.804123904e+09
+                std: 0.33662179112434387
+                sum: 2.8497312e+07
+            hmi_bz:
+                base: surya.datasets.transformations
+                class: StandardScaler
+                count: 33571209216
+                epsilon: 1e-08
+                is_fitted: "true"
+                max: 3.9140491485595703
+                mean: -6.594143087568227e-06
+                min: -3.9124834537506104
+                sl_scale_factor: 0.01
+                ssq: 3.23843296e+08
+                std: 0.09821633249521255
+                sum: -221373.359375
+            hmi_m:
+                base: surya.datasets.transformations
+                class: StandardScaler
+                count: 33571209216
+                epsilon: 1e-08
+                is_fitted: "true"
+                max: 3.6454217433929443
+                mean: -1.8074297258863226e-05
+                min: -3.5852091312408447
+                sl_scale_factor: 0.01
+                ssq: 3.27147904e+08
+                std: 0.09871617704629898
+                sum: -606776
+            hmi_v:
+                base: surya.datasets.transformations
+                class: StandardScaler
+                count: 33571209216
+                epsilon: 1e-08
+                is_fitted: "true"
+                max: 4.553315162658691
+                mean: 0.028541626408696175
+                min: -4.583911418914795
+                sl_scale_factor: 0.01
+                ssq: 1.30445197312e+11
+                std: 1.9709930419921875
+                sum: 9.58176896e+08
+        scalers_path: ./assets/scalers.yaml
+        time_delta_input_minutes:
+            - 0
+        time_delta_target_minutes: 60
+        train_year_end: 2017
+        train_year_start: 2011
+        train_zarr_path: /anvil/scratch/x-jhong6/data/surya_bench_train_hour_8_12.zarr
+        valid_zarr_path: /anvil/scratch/x-jhong6/data/surya_bench_validation.zarr
+drop_hmi_probablity:
+    value: 0
+dtype:
+    value: torch.bfloat16
+freeze_backbone:
+    value: false
+iters_grad_accum:
+    value: 1
+iters_per_epoch_train:
+    value: 99999
+iters_per_epoch_valid:
+    value: 99999
+job_id:
+    value: ar-seg_daily_lora-r32-a64_v2
+loss_weights:
+    value: []
+model:
+    value:
+        bce:
+            pos_weight: 1
+        checkpoint_layers: []
+        depth: 10
+        dice:
+            smooth: "1e-5"
+        dp_rank: 4
+        drop_rate: 0
+        embed_dim: 1280
+        ensemble: null
+        epochs_to_learn_flow: 0
+        finetune: true
+        ft_out_chans: 1
+        ft_unembedding_type: linear
+        img_size: 4096
+        in_channels: 13
+        init_weights: false
+        iou:
+            eps: "1e-6"
+        learned_flow: false
+        lora_config:
+            bias: none
+            lora_alpha: 64
+            lora_dropout: 0.1
+            r: 32
+            target_modules:
+                - q_proj
+                - v_proj
+                - k_proj
+                - out_proj
+                - fc1
+                - fc2
+        mlp_ratio: 4
+        model_type: spectformer_lora
+        num_heads: 16
+        patch_size: 16
+        rpe: false
+        select: bce
+        spectral_blocks: 2
+        time_embedding:
+            n_queries: null
+            time_dim: 1
+            type: linear
+        unet_blocks: 3
+        unet_embed_dim: 128
+        use_lora: true
+        window_size: 2
+num_mask_aia_channels:
+    value: 0
+optimizer:
+    value:
+        learning_rate: 0.001
+        max_epochs: 15
+        min_lr: 1e-06
+        warm_up_steps: 0
+parallelism:
+    value: ddp
+path_experiment:
+    value: checkpoints
+pretrained_path:
+    value: ./assets/surya.366m.v1.pt
+rollout_steps:
+    value: 0
+save_wt_after_iter:
+    value: 100000
+use_latitude_in_learned_flow:
+    value: false
+validate_after_epoch:
+    value: 1
+visualization_samples:
+    value: 3
+wandb_log_train_after:
+    value: 5
+wandb_project:
+    value: helio-fm

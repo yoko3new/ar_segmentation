@@ -6,12 +6,22 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
 #SBATCH --time=00:30:00
-#SBATCH --output=logs/test_%j.log
+#SBATCH --output=/home/x-kyang10/Surya/downstream_examples/ar_segmentation/logs/test_%j.log
+#SBATCH --error=/home/x-kyang10/Surya/downstream_examples/ar_segmentation/logs/test_%j.err
 
 module load conda/2025.02
+eval "$(conda shell.bash hook)"
 conda activate surya
 
-cd ~/Surya/downstream_examples/ar_segmentation
+cd /anvil/scratch/x-kyang10/Surya/downstream_examples/ar_segmentation
 mkdir -p logs checkpoints
 
-torchrun --nnodes=1 --nproc_per_node=1 --standalone finetune.py --gpu --wandb
+export MASTER_ADDR=localhost
+export MASTER_PORT=29500
+export WORLD_SIZE=1
+export RANK=0
+export LOCAL_RANK=0
+export CUDA_VISIBLE_DEVICES=0
+
+python -u finetune.py --gpu --wandb 2>&1
+echo "=== Exit code: $? ==="

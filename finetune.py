@@ -34,8 +34,8 @@ from surya.utils.distributed import (
     set_global_seed,
 )
 
-from models import HelioSpectformer2D, UNet, ChannelAdapter
 from peft import LoraConfig, get_peft_model
+from models import HelioSpectformer2D, UNet, ChannelAdapter, LightweightSegModel
 
 
 class DiceLoss(nn.Module):
@@ -90,7 +90,39 @@ def custom_collate_fn(batch):
     return collated_data, collated_metadata
 
 
-def evaluate_model(dataloader, epoch, model, device, run, criterion):
+def compute_segmentation_metrics(outputs, target, threshold=0.5):
+    """
+    Compute segmentation metrics: IoU, Dice, Precision, Recall.
+    Args:
+        outputs: model logits (before sigmoid)
+        target: ground truth binary mask
+        threshold: threshold for converting probabilities to binary
+    Returns:
+        dict with iou, dice, precision, recall
+    """
+    preds = (torch.sigmoid(outputs) > threshold).float()
+    target_bin = (target > threshold).float()
+
+    intersection = (preds * target_bin).sum()
+    union = preds.sum() + target_bin.sum() - intersection
+    pred_sum = preds.sum()
+    target_sum = target_bin.sum()
+
+    eps = 1e-7
+    iou = (intersection + eps) / (union + eps)
+    dice = (2.0 * intersection + eps) / (pred_sum + target_sum + eps)
+    precision = (intersection + eps) / (pred_sum + eps)
+    recall = (intersection + eps) / (target_sum + eps)
+
+    return {
+        "iou": iou.item(),
+        "dice": dice.item(),
+        "precision": precision.item(),
+        "recall": recall.item(),
+    }
+
+
+def evaluate_model(dataloader, epoch, model, device, run, criterion, total_steps=0):
     model.eval()
 
     abs_err_sum = torch.tensor(0.0, device=device)
@@ -99,6 +131,12 @@ def evaluate_model(dataloader, epoch, model, device, run, criterion):
     targ_sq_sum = torch.tensor(0.0, device=device)
     total_n = torch.tensor(0.0, device=device)
     running_loss, num_batches = 0.0, 0
+
+    # Segmentation metrics accumulators
+    total_iou = 0.0
+    total_dice = 0.0
+    total_precision = 0.0
+    total_recall = 0.0
 
     with torch.no_grad():
         for i, (batch, metadata) in enumerate(dataloader):
@@ -118,9 +156,16 @@ def evaluate_model(dataloader, epoch, model, device, run, criterion):
             running_loss += loss.item()
             num_batches += 1
 
+            # Compute segmentation metrics
+            seg_metrics = compute_segmentation_metrics(outputs, target)
+            total_iou += seg_metrics["iou"]
+            total_dice += seg_metrics["dice"]
+            total_precision += seg_metrics["precision"]
+            total_recall += seg_metrics["recall"]
+
             if i % config["wandb_log_train_after"] == 0 and distributed.is_main_process():
                 print0(f"Epoch: {epoch}, batch: {i}, loss: {reduced_loss.item()}")
-                log(run, {"val_loss": reduced_loss.item()}, step=epoch)
+                log(run, {"val_loss": reduced_loss.item()}, step=total_steps)
 
             diff = outputs - target
             abs_err_sum += torch.abs(diff).sum()
@@ -141,24 +186,36 @@ def evaluate_model(dataloader, epoch, model, device, run, criterion):
 
     avg_loss = running_loss / max(num_batches, 1)
 
+    # Average segmentation metrics
+    avg_iou = total_iou / max(num_batches, 1)
+    avg_dice = total_dice / max(num_batches, 1)
+    avg_precision = total_precision / max(num_batches, 1)
+    avg_recall = total_recall / max(num_batches, 1)
+
     if distributed.is_main_process():
         print0(
-            f"Validation — MAE: {mae:.4f}  RMSE: {rmse:.4f}  R2: {r2:.4f}  "
-            f"Avg Loss: {avg_loss:.4f}  Samples: {int(total_n.item())}"
+            f"Validation — Loss: {avg_loss:.4f}  "
+            f"IoU: {avg_iou:.4f}  Dice: {avg_dice:.4f}  "
+            f"Precision: {avg_precision:.4f}  Recall: {avg_recall:.4f}  "
+            f"MAE: {mae:.4f}  RMSE: {rmse:.4f}"
         )
         log(
             run,
             {
+                "valid/loss": avg_loss,
+                "valid/iou": avg_iou,
+                "valid/dice": avg_dice,
+                "valid/precision": avg_precision,
+                "valid/recall": avg_recall,
                 "valid/mae": mae,
                 "valid/rmse": rmse,
                 "valid/r2": r2,
-                "valid/loss": avg_loss,
                 "valid/total": int(total_n.item()),
             },
-            step=epoch,
+            step=total_steps,
         )
 
-    return mae, rmse, r2, avg_loss
+    return avg_loss, avg_iou, avg_dice
 
 
 def wrap_all_checkpoints(model):
@@ -211,6 +268,12 @@ def get_model(config, wandb_logger) -> torch.nn.Module:
             embed_dim=config["model"]["unet_embed_dim"],
             out_chans=1,
             n_blocks=config["model"]["unet_blocks"],
+        )
+    elif config["model"]["model_type"] == "mobilenet_deeplabv3":
+        print0("Initializing MobileNetV3 + DeepLabV3.")
+        model = LightweightSegModel(
+            in_chans=config["model"]["in_channels"],
+            out_chans=1,
         )
     else:
         raise ValueError(f"Unknown model type {config['model']['model_type']}.")
@@ -317,16 +380,22 @@ def get_dataloaders(config, scalers):
         scalers=scalers,
         channels=channels,
         phase="train",
+        pooling=config["data"].get("pooling", 1),
         ar_mask_base_dir=config["data"]["ar_mask_base_dir"],
         ds_ar_index_paths=config["data"]["ar_index_train"],
+        daily_only=config["data"].get("daily_only", False),
+        year_start=config["data"].get("train_year_start", None),
+        year_end=config["data"].get("train_year_end", None),
     )
     valid_dataset = ArDSDataset(
         zarr_path=config["data"]["valid_zarr_path"],
         scalers=scalers,
         channels=channels,
         phase="valid",
+        pooling=config["data"].get("pooling", 1),
         ar_mask_base_dir=config["data"]["ar_mask_base_dir"],
         ds_ar_index_paths=config["data"]["ar_index_valid"],
+        daily_only=config["data"].get("daily_only", False),
     )
 
     print0(f"Train dataset size: {len(train_dataset)}")
@@ -458,14 +527,13 @@ def main(config, use_gpu: bool, use_wandb: bool, profile: bool):
         dist.all_reduce(running_batch, op=dist.ReduceOp.SUM)
 
         if distributed.is_main_process():
-            log(run, {"epoch_loss": running_loss.item() / running_batch.item()}, step=epoch)
-            log(run, {"step": total_steps}, step=epoch)
+            log(run, {"epoch_loss": running_loss.item() / running_batch.item()}, step=total_steps)
 
         fp = os.path.join(config["path_experiment"], f"epoch_{epoch}.pth")
         save_model_singular(model, fp, parallelism=config["parallelism"])
         print0(f"Epoch {epoch}: Model saved at {fp}")
 
-        evaluate_model(valid_loader, epoch, model, rank, run, criterion)
+        evaluate_model(valid_loader, epoch, model, rank, run, criterion, total_steps)
 
     if run is not None:
         run.finish()

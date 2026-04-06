@@ -2,103 +2,203 @@
 """
 python create_ar_csv.py
 
-Generate CSV index files for Active Region (AR) segmentation datasets.
-Scans for .h5 mask files and creates CSV indices matching the format
-expected by dataset.py (columns: timestamp, file_path, present).
+This script generates CSV index files for Active Region (AR) segmentation datasets.
+It scans a directory tree for .pth maskß files (PyTorch tensors) named with a specific timestamp
+pattern, and creates a CSV file for each year, listing all possible 12-minute intervals
+in that year, the expected file path, the timestamp, and whether the file is present.
 
-Author: [Rohit Lal] (modified by Kang Yang)
-Date: [2025-03-02]
+Example usage:
+    python create_ar_csv.py
+
+Author: [Rohit Lal]
+Date: [2025-08-20]
 """
 
+import os
 import re
 from pathlib import Path
 from tqdm import tqdm
 import pandas as pd
+import numpy as np
 
-
-def fetch_h5_files(directory, start_date, end_date):
+def fetch_pth_files(directory, start_year, start_month, end_year, end_month, start_date=1, end_date=31):
     """
-    Recursively find all .h5 files that fall within the specified date range.
-    Returns a set of relative file paths.
-    """
-    pattern = re.compile(r"(\d{8})_(\d{4})\.h5")
-    start = pd.Timestamp(start_date)
-    end = pd.Timestamp(end_date)
-    matching_files = set()
+    Recursively find all .pth files in a directory tree that match a specific
+    timestamp pattern and fall within the specified year/month/date range.
 
-    for filepath in sorted(Path(directory).rglob("*.h5")):
-        match = pattern.match(filepath.name)
+    Args:
+        directory (str or Path): Root directory to search.
+        start_year (int): Start year (inclusive).
+        start_month (int): Start month (1-12, inclusive).
+        end_year (int): End year (inclusive).
+        end_month (int): End month (1-12, inclusive).
+        start_date (int): Start date (1-31, inclusive). Default is 1.
+        end_date (int): End date (1-31, inclusive). Default is 31.
+
+    Returns:
+        list of str: List of file paths (as strings) matching the criteria.
+    """
+    pattern = re.compile(r"(\d{8})_(\d{4})\.pth")
+    matching_files = []
+
+    for filepath in sorted(Path(directory).rglob("*.pth")):
+        filename = filepath.name
+        match = pattern.match(filename)
         if not match:
             continue
         date_str = match.group(1)
-        time_str = match.group(2)
-        try:
-            ts = pd.Timestamp(
-                f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]} "
-                f"{time_str[:2]}:{time_str[2:]}:00"
-            )
-        except ValueError:
-            continue
+        year = int(date_str[:4])
+        month = int(date_str[4:6])
+        day = int(date_str[6:8])
 
-        if start <= ts <= end:
-            rel_path = f"data/{ts.year}/{ts.month:02d}/{filepath.name}"
-            matching_files.add(rel_path)
+        # Check if file is within the specified year/month/date range
+        if (
+            (start_year < year < end_year)
+            or (year == start_year and start_month < month < end_month)
+            or (year == end_year and month < end_month)
+            or (year == start_year and month == start_month and start_date <= day <= end_date)
+            or (year == end_year and month == end_month and day <= end_date)
+            or (start_year < year == end_year and month == end_month and day <= end_date)
+            or (year == start_year and start_month < month == end_month and day <= end_date)
+        ):
+            matching_files.append(str(filepath))
 
     return matching_files
 
-
-def create_csv_index(mask_dir, start_date, end_date, interval_minutes, csv_output):
+def create_csv_index(
+    dirpath,
+    start_year,
+    start_month,
+    end_year,
+    end_month,
+    csv_output,
+    all_possible_intervals,
+    start_date=1,
+    end_date=31,
+):
     """
-    Create a CSV index for AR segmentation .h5 files.
+    Create a CSV index for AR segmentation .pth files.
+
+    Args:
+        dirpath (Path): Directory containing AR .pth files.
+        start_year (int): Start year (inclusive).
+        start_month (int): Start month (1-12, inclusive).
+        end_year (int): End year (inclusive).
+        end_month (int): End month (1-12, inclusive).
+        csv_output (Path): Output CSV file path.
+        all_possible_intervals (list): List of [filepath, timestamp] pairs for all intervals.
+        start_date (int): Start date (1-31, inclusive). Default is 1.
+        end_date (int): End date (1-31, inclusive). Default is 31.
+
+    Returns:
+        pd.DataFrame: DataFrame containing the index.
     """
-    print(f"Scanning for .h5 files in {mask_dir} ...")
-    existing_files = fetch_h5_files(mask_dir, start_date, end_date)
-    print(f"Found {len(existing_files)} .h5 files")
-
-    time_intervals = pd.date_range(
-        start=start_date, end=end_date, freq=f"{interval_minutes}min"
-    )
-    print(f"Generated {len(time_intervals)} time intervals ({interval_minutes}min)")
-
+    pth_files = fetch_pth_files(dirpath, start_year, start_month, end_year, end_month, start_date, end_date)
+    pth_files_set = set(pth_files)
     records = []
-    matched = 0
-    for t in tqdm(time_intervals, desc="Building index"):
-        fname = t.strftime("%Y%m%d_%H%M") + ".h5"
-        rel_path = f"data/{t.year}/{t.month:02d}/{fname}"
-        present = 1.0 if rel_path in existing_files else 0.0
-        if present:
-            matched += 1
-        records.append({
-            "timestamp": t.strftime("%Y-%m-%d %H:%M:%S"),
-            "file_path": rel_path if present else "",
-            "present": present,
-        })
 
+    for filepath, time_val in tqdm(all_possible_intervals, desc="Processing files"):
+        filepath_str = str(filepath)
+        present = 1 if filepath_str in pth_files_set else 0
+        records.append(
+            {
+                "path": filepath_str,
+                "timestep": time_val,  # string, e.g. "2013-01-01 00:00:00"
+                "present": present,
+            }
+        )
     df = pd.DataFrame(records)
-    csv_output.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(csv_output, index=False)
-    print(f"Saved to {csv_output}")
-    print(f"Matched: {matched}/{len(time_intervals)} ({matched/len(time_intervals)*100:.1f}%)")
+    print(f"Index file created at {csv_output}")
     return df
 
+def generate_time_intervals(dirpath, start_year, start_month, end_year, end_month, start_date=1, end_date=31):
+    """
+    Generate all possible 12-minute intervals between the start and end year/month/date,
+    and construct the expected .pth file path for each interval.
 
-def main():
+    Args:
+        dirpath (Path): Root directory for AR .pth files.
+        start_year (int): Start year (inclusive).
+        start_month (int): Start month (1-12, inclusive).
+        end_year (int): End year (inclusive).
+        end_month (int): End month (1-12, inclusive).
+        start_date (int): Start date (1-31, inclusive). Default is 1.
+        end_date (int): End date (1-31, inclusive). Default is 31.
+
+    Returns:
+        list: List of [Path, str] pairs, where Path is the expected .pth file path,
+              and str is the formatted timestamp.
+    """
+    # Start at the specified date and time
+    start_time = np.datetime64(f"{start_year}-{start_month:02d}-{start_date:02d} 00:00:00")
+    
+    # End at the last second of the specified end date
+    end_time = np.datetime64(f"{end_year}-{end_month:02d}-{end_date:02d} 23:59:59")
+
+    # 12-minute intervals
+    time_intervals = pd.date_range(start=start_time, end=end_time, freq="12T")
+    result = []
+
+    for time in time_intervals:
+        date_str = time.strftime("%Y%m%d")
+        time_str = time.strftime("%H%M")
+        # Path: {dirpath}/{year}_extracted/{year}/{month:02d}/{YYYYMMDD}_{HHMM}.pth
+        filename = (
+            dirpath
+            / f"{time.year}_extracted"
+            / f"{time.year}"
+            / f"{time.month:02d}"
+            / f"{date_str}_{time_str}.pth"
+        )
+        formatted_time = time.strftime("%Y-%m-%d %H:%M:%S")
+        result.append([filename, formatted_time])
+
+    return result
+
+def main(start_year, start_month, end_month, start_date=1, end_date=31):
+    """
+    Main entry point for AR CSV index generation.
+    Generates a CSV file for the specified date range.
+    
+    Args:
+        start_year (int): Start year (inclusive).
+        start_month (int): Start month (1-12, inclusive).
+        end_month (int): End month (1-12, inclusive).
+        start_date (int): Start date (1-31, inclusive). Default is 1.
+        end_date (int): End date (1-31, inclusive). Default is 31.
+    """
+    end_year = start_year
+
     cwd = Path(__file__).parent.resolve()
-    mask_dir = cwd / "assets" / "surya-bench-ar-segmentation"
-    output_dir = cwd / "assets"
+    valid_extracted_path = cwd / "assets" / "surya-bench-ar-segmentation"
+    
+    # Create more descriptive filename based on date range
+    if start_date == 1 and end_date == 31:
+        csv_filename = f"ar_{start_year}_m{start_month:02d}-{end_month:02d}.csv"
+    else:
+        csv_filename = f"ar_{start_year}_m{start_month:02d}d{start_date:02d}-m{end_month:02d}d{end_date:02d}.csv"
+    
+    csv_output = cwd / "assets" / "ar_csv_files" / csv_filename
+    csv_output.parent.mkdir(parents=True, exist_ok=True)
 
-    print("Generating AR segmentation CSV index ...")
-    print("Date range: 2010-01-01 to 2024-12-31")
-    print("Interval: 12 minutes")
-
-    create_csv_index(
-        mask_dir=mask_dir,
-        start_date="2010-01-01",
-        end_date="2024-12-31",
-        interval_minutes=12,
-        csv_output=output_dir / "ar_index_12min.csv",
+    all_possible_intervals = generate_time_intervals(
+        valid_extracted_path, start_year, start_month, end_year, end_month, start_date, end_date
     )
 
+    _ = create_csv_index(
+        valid_extracted_path,
+        start_year,
+        start_month,
+        end_year,
+        end_month,
+        csv_output,
+        all_possible_intervals,
+        start_date,
+        end_date,
+    )
 
 if __name__ == "__main__":
-    main()
+    
+    # Example: Generate CSV for January 6-8, 2011
+    main(start_year=2011, start_month=1, end_month=1, start_date=6, end_date=8)

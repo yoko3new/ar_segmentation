@@ -46,6 +46,7 @@ class ArDSDataset(Dataset):
     """
     AR Segmentation dataset that reads input images from zarr
     and binary masks from h5 files.
+    Supports filtering by time of day (daily_only) and year range.
     """
 
     def __init__(
@@ -57,6 +58,9 @@ class ArDSDataset(Dataset):
         pooling: int | None = None,
         ar_mask_base_dir: str = "./assets/surya-bench-ar-segmentation",
         ds_ar_index_paths: list = None,
+        daily_only: bool = False,
+        year_start: int = None,
+        year_end: int = None,
     ):
         self.scalers = scalers
         self.phase = phase
@@ -102,11 +106,28 @@ class ArDSDataset(Dataset):
         # Build final valid samples
         self.ar_index.set_index("timestamp", inplace=True)
         self.valid_timestamps = matched
-        self.adjusted_length = len(self.valid_timestamps)
 
         print(f"[{phase}] Zarr timestamps: {len(zarr_timestamps)}, "
               f"Mask files: {len(mask_timestamps)}, "
-              f"Matched samples: {self.adjusted_length}")
+              f"Matched samples: {len(self.valid_timestamps)}")
+
+        # Filter: only keep midnight (00:00) timestamps
+        if daily_only:
+            self.valid_timestamps = [
+                t for t in self.valid_timestamps if t.hour == 0
+            ]
+            print(f"[{phase}] Filtered to daily (00:00) only: {len(self.valid_timestamps)}")
+
+        # Filter: only keep timestamps within year range
+        if year_start is not None and year_end is not None:
+            self.valid_timestamps = [
+                t for t in self.valid_timestamps
+                if year_start <= t.year <= year_end
+            ]
+            print(f"[{phase}] Filtered to {year_start}-{year_end}: {len(self.valid_timestamps)}")
+
+        self.adjusted_length = len(self.valid_timestamps)
+        print(f"[{phase}] Final dataset size: {self.adjusted_length}")
 
         # Logger
         self.rank = get_rank()
@@ -144,7 +165,12 @@ class ArDSDataset(Dataset):
 
         try:
             with h5py.File(full_path, "r") as f:
-                mask = torch.from_numpy(f["union_with_intersect"][...])
+                mask = f["union_with_intersect"][...]
+                if self.pooling > 1:
+                    mask = skimage.measure.block_reduce(
+                        mask, block_size=(self.pooling, self.pooling), func=np.max
+                    )
+                mask = torch.from_numpy(mask)
         except Exception as e:
             print(f"Error loading mask from {full_path}: {e}")
             raise e
