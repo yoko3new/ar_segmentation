@@ -1,4 +1,4 @@
-job_id: ar-seg_daily_unet_4k_dim64
+job_id: ar-seg_daily_lora-r32-a64_resume2
 
 data:
   train_zarr_path: /anvil/scratch/x-jhong6/data/surya_bench_train_hour_8_12.zarr
@@ -18,7 +18,7 @@ data:
   daily_only: true
 
 model:
-  model_type: unet
+  model_type: spectformer_lora
   img_size: 4096
   patch_size: 16
   in_channels: 13
@@ -45,7 +45,7 @@ model:
   finetune: True
   ft_unembedding_type: "linear"
   ft_out_chans: 1
-  use_lora: false
+  use_lora: true
   lora_config:
     r: 32
     lora_alpha: 64
@@ -66,9 +66,10 @@ adapter:
 
 optimizer:
   warm_up_steps: 0
-  max_epochs: 15
-  learning_rate: 0.001
+  max_epochs: 35
+  learning_rate: 0.00005
   min_lr: 0.000001
+
 use_latitude_in_learned_flow: false
 loss_weights: []
 rollout_steps: 0
@@ -76,15 +77,19 @@ num_mask_aia_channels: 0
 drop_hmi_probablity: 0.0
 validate_after_epoch: 1
 wandb_log_train_after: 5
-wandb_project: "helio-fm"
+wandb_project: "ar-segmentation"
 visualization_samples: 3
 save_wt_after_iter: 100000
-path_experiment: checkpoints_unet
+path_experiment: checkpoints_resume2
 iters_per_epoch_train: 99999
 iters_per_epoch_valid: 99999
 iters_grad_accum: 1
 dtype: bfloat16
 parallelism: "ddp"
 
-pretrained_path: null
+pretrained_path: ./assets/surya.366m.v1.pt
 freeze_backbone: False
+
+# Resume training settings
+resume_checkpoint: ./checkpoints_resume/epoch_24.pth
+start_epoch: 25

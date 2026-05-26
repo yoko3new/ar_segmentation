@@ -1,24 +1,41 @@
-job_id: ar-seg_daily_unet_4k_dim64
-
+job_id: ar-seg_linear_probe_12h
 data:
   train_zarr_path: /anvil/scratch/x-jhong6/data/surya_bench_train_hour_8_12.zarr
   valid_zarr_path: /anvil/scratch/x-jhong6/data/surya_bench_validation.zarr
-  channels: ['aia94', 'aia131', 'aia171', 'aia193', 'aia211', 'aia304', 'aia335', 'aia1600', 'hmi_m', 'hmi_bx', 'hmi_by', 'hmi_bz', 'hmi_v']
-  time_delta_input_minutes: [0]
-  time_delta_target_minutes: +60
+  channels:
+  - aia94
+  - aia131
+  - aia171
+  - aia193
+  - aia211
+  - aia304
+  - aia335
+  - aia1600
+  - hmi_m
+  - hmi_bx
+  - hmi_by
+  - hmi_bz
+  - hmi_v
+  time_delta_input_minutes:
+  - 0
+  time_delta_target_minutes: 60
   batch_size: 1
   num_data_workers: 4
   prefetch_factor: 2
   scalers_path: ./assets/scalers.yaml
-  ar_index_train: ["./assets/ar_index_12min.csv"]
-  ar_index_valid: ["./assets/ar_index_12min.csv"]
+  ar_index_train:
+  - ./assets/surya-bench-ar-segmentation/train.csv
+  ar_index_valid:
+  - ./assets/surya-bench-ar-segmentation/validation.csv
   ar_mask_base_dir: ./assets/surya-bench-ar-segmentation
+  daily_only: false
+  hour_filter:
+  - 0
+  - 12
   train_year_start: 2011
   train_year_end: 2017
-  daily_only: true
-
 model:
-  model_type: unet
+  model_type: spectformer_lora
   img_size: 4096
   patch_size: 16
   in_channels: 13
@@ -42,33 +59,40 @@ model:
   ensemble: null
   unet_embed_dim: 128
   unet_blocks: 3
-  finetune: True
-  ft_unembedding_type: "linear"
+  finetune: true
+  ft_unembedding_type: linear
   ft_out_chans: 1
   use_lora: false
   lora_config:
     r: 32
     lora_alpha: 64
-    target_modules: ['q_proj', 'v_proj', 'k_proj', 'out_proj', 'fc1', 'fc2']
+    target_modules:
+    - q_proj
+    - v_proj
+    - k_proj
+    - out_proj
+    - fc1
+    - fc2
     lora_dropout: 0.1
-    bias: 'none'
-  select: "bce"
+    bias: none
+  select: bce
   dice:
     smooth: 1e-5
   iou:
     eps: 1e-6
   bce:
     pos_weight: 1
-
 adapter:
-  use_channel_adapter: False
-  channels: ['aia94', 'aia131', 'aia171']
-
+  use_channel_adapter: false
+  channels:
+  - aia94
+  - aia131
+  - aia171
 optimizer:
   warm_up_steps: 0
   max_epochs: 15
   learning_rate: 0.001
-  min_lr: 0.000001
+  min_lr: 1.0e-06
 use_latitude_in_learned_flow: false
 loss_weights: []
 rollout_steps: 0
@@ -76,15 +100,14 @@ num_mask_aia_channels: 0
 drop_hmi_probablity: 0.0
 validate_after_epoch: 1
 wandb_log_train_after: 5
-wandb_project: "helio-fm"
+wandb_project: ar-segmentation
 visualization_samples: 3
 save_wt_after_iter: 100000
-path_experiment: checkpoints_unet
+path_experiment: checkpoints_linear_probe
 iters_per_epoch_train: 99999
 iters_per_epoch_valid: 99999
 iters_grad_accum: 1
 dtype: bfloat16
-parallelism: "ddp"
-
-pretrained_path: null
-freeze_backbone: False
+parallelism: ddp
+pretrained_path: ./assets/surya.366m.v1.pt
+freeze_backbone: true

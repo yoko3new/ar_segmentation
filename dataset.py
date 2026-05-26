@@ -59,6 +59,7 @@ class ArDSDataset(Dataset):
         ar_mask_base_dir: str = "./assets/surya-bench-ar-segmentation",
         ds_ar_index_paths: list = None,
         daily_only: bool = False,
+        hour_filter: list = None,
         year_start: int = None,
         year_end: int = None,
     ):
@@ -117,6 +118,13 @@ class ArDSDataset(Dataset):
                 t for t in self.valid_timestamps if t.hour == 0
             ]
             print(f"[{phase}] Filtered to daily (00:00) only: {len(self.valid_timestamps)}")
+
+        # Filter: only keep specific hours
+        if hour_filter is not None:
+            self.valid_timestamps = [
+                t for t in self.valid_timestamps if t.hour in hour_filter
+            ]
+            print(f"[{phase}] Filtered to hours {hour_filter}: {len(self.valid_timestamps)}")
 
         # Filter: only keep timestamps within year range
         if year_start is not None and year_end is not None:

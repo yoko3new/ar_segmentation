@@ -44,8 +44,9 @@ class DiceLoss(nn.Module):
         self.smooth = float(smooth)
 
     def forward(self, preds, target):
-        preds = torch.sigmoid(preds).view(-1)
-        target = target.view(-1)
+        # Cast to float32 to avoid bfloat16 precision loss when summing millions of pixels
+        preds = torch.sigmoid(preds.float()).view(-1)
+        target = target.float().view(-1)
 
         intersection = (preds * target).sum()
         dice = (2.0 * intersection + self.smooth) / (preds.sum() + target.sum() + self.smooth)
@@ -58,7 +59,8 @@ class IoULoss(nn.Module):
         self.eps = eps
 
     def forward(self, preds, target):
-        outputs = torch.sigmoid(preds)
+        outputs = torch.sigmoid(preds.float())
+        target = target.float()
         intersection = (outputs * target).sum(dim=(1, 2, 3))
         union = outputs.sum(dim=(1, 2, 3)) + target.sum(dim=(1, 2, 3)) - intersection
         iou = (intersection + self.eps) / (union + self.eps)
@@ -93,12 +95,6 @@ def custom_collate_fn(batch):
 def compute_segmentation_metrics(outputs, target, threshold=0.5):
     """
     Compute segmentation metrics: IoU, Dice, Precision, Recall.
-    Args:
-        outputs: model logits (before sigmoid)
-        target: ground truth binary mask
-        threshold: threshold for converting probabilities to binary
-    Returns:
-        dict with iou, dice, precision, recall
     """
     preds = (torch.sigmoid(outputs) > threshold).float()
     target_bin = (target > threshold).float()
@@ -132,7 +128,6 @@ def evaluate_model(dataloader, epoch, model, device, run, criterion, total_steps
     total_n = torch.tensor(0.0, device=device)
     running_loss, num_batches = 0.0, 0
 
-    # Segmentation metrics accumulators
     total_iou = 0.0
     total_dice = 0.0
     total_precision = 0.0
@@ -156,7 +151,6 @@ def evaluate_model(dataloader, epoch, model, device, run, criterion, total_steps
             running_loss += loss.item()
             num_batches += 1
 
-            # Compute segmentation metrics
             seg_metrics = compute_segmentation_metrics(outputs, target)
             total_iou += seg_metrics["iou"]
             total_dice += seg_metrics["dice"]
@@ -185,8 +179,6 @@ def evaluate_model(dataloader, epoch, model, device, run, criterion, total_steps
     r2 = float("nan") if var_y == 0 else 1.0 - (mse / var_y)
 
     avg_loss = running_loss / max(num_batches, 1)
-
-    # Average segmentation metrics
     avg_iou = total_iou / max(num_batches, 1)
     avg_dice = total_dice / max(num_batches, 1)
     avg_precision = total_precision / max(num_batches, 1)
@@ -194,7 +186,7 @@ def evaluate_model(dataloader, epoch, model, device, run, criterion, total_steps
 
     if distributed.is_main_process():
         print0(
-            f"Validation — Loss: {avg_loss:.4f}  "
+            f"Validation - Loss: {avg_loss:.4f}  "
             f"IoU: {avg_iou:.4f}  Dice: {avg_dice:.4f}  "
             f"Precision: {avg_precision:.4f}  Recall: {avg_recall:.4f}  "
             f"MAE: {mae:.4f}  RMSE: {rmse:.4f}"
@@ -274,6 +266,7 @@ def get_model(config, wandb_logger) -> torch.nn.Module:
         model = LightweightSegModel(
             in_chans=config["model"]["in_channels"],
             out_chans=1,
+            pretrained=config["model"].get("mobilenet_pretrained", True),
         )
     else:
         raise ValueError(f"Unknown model type {config['model']['model_type']}.")
@@ -359,6 +352,26 @@ def apply_peft_lora(
     return model
 
 
+def freeze_backbone(model, config):
+    """Freeze all parameters except the head (unembed) for linear probing."""
+    print0("Freezing backbone for linear probing - only training head (unembed)...")
+    for name, param in model.named_parameters():
+        if "unembed" in name:
+            param.requires_grad = True
+        else:
+            param.requires_grad = False
+
+    if distributed.is_main_process():
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        all_param = sum(p.numel() for p in model.parameters())
+        print0(
+            f"After freeze - trainable params: {trainable_params:,} || "
+            f"all params: {all_param:,} || "
+            f"trainable%: {100 * trainable_params / all_param:.4f}%"
+        )
+    return model
+
+
 def broadcast_dict(obj_dict, src=0):
     rank = torch.distributed.get_rank()
     if rank != src:
@@ -370,10 +383,8 @@ def broadcast_dict(obj_dict, src=0):
 
 def get_dataloaders(config, scalers):
 
-    if config["adapter"]["use_channel_adapter"]:
-        channels = config["adapter"]["channels"]
-    else:
-        channels = config["data"]["channels"]
+    # Dataset always reads all 13 channels; ChannelAdapter selects channels at model level
+    channels = config["data"]["channels"]
 
     train_dataset = ArDSDataset(
         zarr_path=config["data"]["train_zarr_path"],
@@ -384,6 +395,7 @@ def get_dataloaders(config, scalers):
         ar_mask_base_dir=config["data"]["ar_mask_base_dir"],
         ds_ar_index_paths=config["data"]["ar_index_train"],
         daily_only=config["data"].get("daily_only", False),
+        hour_filter=config["data"].get("hour_filter", None),
         year_start=config["data"].get("train_year_start", None),
         year_end=config["data"].get("train_year_end", None),
     )
@@ -396,6 +408,7 @@ def get_dataloaders(config, scalers):
         ar_mask_base_dir=config["data"]["ar_mask_base_dir"],
         ds_ar_index_paths=config["data"]["ar_index_valid"],
         daily_only=config["data"].get("daily_only", False),
+        hour_filter=config["data"].get("hour_filter", None),
     )
 
     print0(f"Train dataset size: {len(train_dataset)}")
@@ -454,13 +467,23 @@ def main(config, use_gpu: bool, use_wandb: bool, profile: bool):
 
     if config["model"]["use_lora"]:
         model = apply_peft_lora(model, config)
+
     if config["adapter"]["use_channel_adapter"]:
-        num_data_chans = len(config["adapter"]["channels"])
+        adapter_channels = config["adapter"]["channels"]
+        all_channels = config["data"]["channels"]
+        channel_indices = [all_channels.index(ch) for ch in adapter_channels]
+        num_data_chans = len(adapter_channels)
         print0("Using Adapters for", config["model"]["in_channels"], "-->", num_data_chans, "channels")
+        print0("Channel indices:", channel_indices)
         model = ChannelAdapter(model,
             num_data_chans=num_data_chans,
             time_dim=config["model"]["time_embedding"]["time_dim"],
+            channel_indices=channel_indices,
         )
+
+    # Freeze backbone for linear probing if specified
+    if config.get("freeze_backbone", False):
+        model = freeze_backbone(model, config)
 
     model.to(rank)
 
@@ -471,21 +494,65 @@ def main(config, use_gpu: bool, use_wandb: bool, profile: bool):
     total_params = sum(p.numel() for p in model.parameters())
     print0(f"Total number of parameters: {total_params:,}")
 
+    # Use find_unused_parameters=True for linear probing to avoid DDP errors
+    find_unused = config.get("freeze_backbone", False)
     model = DistributedDataParallel(
         model,
         device_ids=[torch.cuda.current_device()],
-        find_unused_parameters=False,
+        find_unused_parameters=find_unused,
     )
 
-    criterion = torch.nn.BCEWithLogitsLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=config["optimizer"]["learning_rate"])
+    # Resume from checkpoint if specified
+    resume_path = config.get("resume_checkpoint", None)
+    start_epoch = config.get("start_epoch", 0)
+    if resume_path and os.path.exists(resume_path):
+        print0(f"Resuming from checkpoint: {resume_path}")
+        checkpoint_state = torch.load(resume_path, map_location="cpu")
+        model.module.load_state_dict(checkpoint_state)
+        print0(f"Checkpoint loaded. Resuming from epoch {start_epoch}.")
+    elif resume_path:
+        print0(f"WARNING: resume_checkpoint specified but not found: {resume_path}")
+        print0("Starting training from scratch.")
+        start_epoch = 0
+
+    # Loss selection
+    loss_type = config["model"].get("select", "bce")
+    if loss_type == "bce":
+        criterion = torch.nn.BCEWithLogitsLoss()
+        print0("Using BCE loss")
+    elif loss_type == "dice":
+        criterion = DiceLoss(smooth=float(config["model"]["dice"]["smooth"]))
+        print0("Using Dice loss")
+    elif loss_type == "bce_dice":
+        bce = torch.nn.BCEWithLogitsLoss()
+        dice = DiceLoss(smooth=float(config["model"]["dice"]["smooth"]))
+        criterion = lambda pred, target: 0.5 * bce(pred, target) + 0.5 * dice(pred, target)
+        print0("Using BCE + Dice combo loss")
+    else:
+        raise ValueError(f"Unknown loss type: {loss_type}")
+
+    # Only optimize parameters that require grad (important for linear probing)
+    optimizer = torch.optim.Adam(
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=config["optimizer"]["learning_rate"]
+    )
     device = local_rank
 
+    # Cosine annealing learning rate scheduler
+    total_epochs = config["optimizer"]["max_epochs"]
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=total_epochs - start_epoch,
+        eta_min=config["optimizer"]["min_lr"],
+    )
+
     scaler = GradScaler()
-    total_steps = 0
-    print0(f"Starting training for {config['optimizer']['max_epochs']} epochs.")
-    for epoch in range(config["optimizer"]["max_epochs"]):
-        print0(f"Epoch {epoch} of {config['optimizer']['max_epochs']}")
+    total_steps = start_epoch * min(config.get("iters_per_epoch_train", 99999), 99999)
+    print0(f"Starting training for epochs {start_epoch} to {total_epochs - 1}.")
+    print0(f"Learning rate: {config['optimizer']['learning_rate']} -> {config['optimizer']['min_lr']} (cosine annealing)")
+
+    for epoch in range(start_epoch, total_epochs):
+        print0(f"Epoch {epoch} of {total_epochs}")
         model.train()
         running_loss = torch.tensor(0.0, device=device)
         running_batch = torch.tensor(0, device=device)
@@ -534,6 +601,13 @@ def main(config, use_gpu: bool, use_wandb: bool, profile: bool):
         print0(f"Epoch {epoch}: Model saved at {fp}")
 
         evaluate_model(valid_loader, epoch, model, rank, run, criterion, total_steps)
+
+        # Step the learning rate scheduler
+        scheduler.step()
+        if distributed.is_main_process():
+            current_lr = scheduler.get_last_lr()[0]
+            print0(f"Epoch {epoch}: Learning rate = {current_lr:.8f}")
+            log(run, {"learning_rate": current_lr}, step=total_steps)
 
     if run is not None:
         run.finish()

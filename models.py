@@ -14,16 +14,19 @@ from functools import partial
 
 
 class ChannelAdapter(nn.Module):
-    def __init__(self, model, num_data_chans, time_dim, out_chans: int=13,):
+    def __init__(self, model, num_data_chans, time_dim, out_chans: int=13, channel_indices=None):
         super().__init__()
         self.num_data_chans = num_data_chans
         self.out_chans = out_chans
         self.time_dim = time_dim
+        self.channel_indices = channel_indices
         
         self.adapter = nn.Conv3d(self.num_data_chans, self.out_chans, kernel_size=1, padding=0)
         self.model = model
 
     def forward(self, batch: torch.Tensor) -> torch.Tensor:
+        if self.channel_indices is not None:
+            batch['ts'] = batch['ts'][:, self.channel_indices]
         batch['ts'] = self.adapter(batch['ts'])
         x = self.model(batch)
         return x
@@ -459,11 +462,11 @@ class UNetDecoder(nn.Module):
 class LightweightSegModel(nn.Module):
     """Lightweight segmentation baseline using MobileNetV3 + DeepLabV3."""
 
-    def __init__(self, in_chans: int = 13, out_chans: int = 1):
+    def __init__(self, in_chans: int = 13, out_chans: int = 1, pretrained: bool = True):
         super().__init__()
         from torchvision.models.segmentation import deeplabv3_mobilenet_v3_large
 
-        self.model = deeplabv3_mobilenet_v3_large(weights="DEFAULT")
+        self.model = deeplabv3_mobilenet_v3_large(weights="DEFAULT" if pretrained else None, weights_backbone="DEFAULT" if pretrained else None)
 
         # Replace BatchNorm with GroupNorm for batch_size=1
         self._replace_batchnorm(self.model)
