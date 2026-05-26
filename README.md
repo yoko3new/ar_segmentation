@@ -1,145 +1,144 @@
-# Active Region Segmentation
+# Active Region Segmentation with Surya Foundation Model
+ 
+Fine-tuning and evaluation of the Surya solar foundation model for Active Region (AR) segmentation, with comparisons to UNet and MobileNet+DeepLabV3 baselines.
+ 
+## Task
+ 
+Binary semantic segmentation of Active Regions containing Polarity Inversion Lines (PILs) from full-disk SDO observations.
+ 
+- **Input**: 13-channel solar images (8 AIA + 5 HMI), 4096×4096 resolution
+- **Output**: Binary mask (4096×4096), AR with PIL = 1, background = 0
 
-A fine-tuning example for solar Active Region (AR) segmentation using the Surya foundation model. This project demonstrates how to adapt Surya for downstream computer vision tasks on solar imagery.
-
-
-## Requirements
-
-### System Requirements
-- Python 3.8+
-- CUDA-capable GPU (recommended)
-- 50GB+ free disk space for dataset
-- Hugging Face account for data access
-
-
-## Setup and Data Download
-
+### Model Parameters
+ 
+| Model | Overall Parameters | Trainable Parameters |
+|-------|-------------------|---------------------|
+| SpectFormer+LoRA | 362.09M | 4.43M (1.22%) |
+| Linear Probing | 358.00M | 0.33M (0.09%) |
+| UNet (scratch) | 37.02M | 37.02M (100%) |
+| MobileNet | 11.02M | 11.02M (100%) |
+ 
+## Setup
+ 
+### Prerequisites
+- Python 3.11+
+- CUDA-capable GPU (H100 80GB recommended)
+- ~60GB disk space for AR masks
+### Installation
 ```bash
-cd downstream_examples/ar_segmentation
-
-# Download AR segmentation dataset (requires Hugging Face login)
+conda create -n surya python=3.11
+conda activate surya
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+pip install zarr wandb peft h5py scikit-image pyyaml pandas tqdm einops timm xarray netCDF4
+```
+ 
+### Data Download
+```bash
+# Download AR segmentation masks and index files
 bash download_data.sh
-
-# Create CSV indices for training data
-python create_ar_csv.py
-
-# unzip masks stored in data.tar.gz in data
+ 
+# Extract masks
 cd assets/surya-bench-ar-segmentation
 mkdir -p data
-tar -xvzf data.tar.gz -C data
+tar -xzf data.tar.gz -C data/
+ 
+# Download test NC files from S3
+aws s3 sync s3://nasa-surya-bench/2020/ test_nc/2020/ --no-sign-request --exclude "*" --include "*_0000.nc"
+# Repeat for 2021-2024
 ```
-
+ 
 ## Training
-
+ 
+### Surya + LoRA (default)
 ```bash
-cd downstream_examples/ar_segmentation
-# Single GPU training
-torchrun --nnodes=1 --nproc_per_node=1 --standalone finetune.py
-
-# Multi-GPU training (example for 4 GPUs)
-torchrun --nnodes=1 --nproc_per_node=4 --standalone finetune.py
+export PYTHONPATH=/path/to/Surya:$PYTHONPATH
+export MASTER_ADDR=localhost MASTER_PORT=29500 WORLD_SIZE=1 RANK=0 LOCAL_RANK=0
+ 
+python -u finetune.py --gpu --wandb --config_path ./config.yaml
 ```
-
-## Inference
-
-Run Active Region segmentation inference using either the interactive notebook or command-line scripts.
-**Prerequisites**: Download all the data using the [download_data.sh](download_data.sh) script.
-
-### Option A: Interactive Notebook (Recommended for beginners)
-
-The [ar_segmentation_tutorial.ipynb](ar_segmentation_tutorial.ipynb) notebook provides step-by-step guidance with visualizations.
-
-### Option B: Command-Line Inference
-
-**Basic GPU Inference**
+ 
+### Configuration Options
+ 
+| Config | Description |
+|--------|-------------|
+| `config.yaml` | LoRA+BCE, 24h daily, 2011-2017 |
+| `config_unet.yaml` | UNet from scratch |
+| `config_mobilenet.yaml` | MobileNet+DeepLabV3 (ImageNet pretrained) |
+| `config_mobilenet_scratch.yaml` | MobileNet+DeepLabV3 (random init) |
+| `config_linear_probe_24h.yaml` | Frozen backbone + linear head |
+| `config_aia_only.yaml` | LoRA with AIA channels only (8ch) |
+| `config_hmi_only.yaml` | LoRA with HMI channels only (5ch) |
+| `config_12h_bce_dice.yaml` | LoRA+BCE+Dice, 12h cadence |
+ 
+### Key Training Features
+- **Resume training**: Set `resume_checkpoint` and `start_epoch` in config
+- **Cosine annealing**: LR decays from `learning_rate` to `min_lr`
+- **Loss functions**: `select: bce`, `dice`, or `bce_dice`
+- **Freeze backbone**: `freeze_backbone: true` for linear probing
+- **Channel ablation**: `adapter.use_channel_adapter: true` with selected channels
+- **Hour filtering**: `data.hour_filter: [0, 12]` for temporal cadence control
+## Test Evaluation
+ 
 ```bash
-python infer.py --checkpoint_path ./assets/ar_segmentation_weights.pth \
-                --output_dir ./inference_results \
-                --num_samples 3 \
-                --device cuda 
+# 24h models
+python test.py \
+    --config_path ./config.yaml \
+    --checkpoint_path ./best_checkpoints/lora_bce_epoch_31.pth \
+    --nc_dir /path/to/test_nc \
+    --hour_filter 0 \
+    --output_csv ./test_results/lora_bce.csv \
+    --save_preds_dir ./test_preds/lora_bce
+ 
+# Quick debug (10 samples)
+python test.py --config_path ./config.yaml \
+    --checkpoint_path ./best_checkpoints/lora_bce_epoch_31.pth \
+    --hour_filter 0 --max_samples 10
 ```
-
-**CPU Inference** (slower but no GPU required)
+ 
+### Test Output
+- **CSV**: Per-sample IoU, Dice, Precision, Recall, TP, FP, FN
+- **Raw predictions**: Sigmoid outputs saved as float16 `.npy` files
+- **Summary**: Both sample-wise (macro) and global (micro) averages
+### Threshold Analysis
+Raw sigmoid predictions enable post-hoc threshold analysis:
 ```bash
-python infer.py --checkpoint_path ./assets/ar_segmentation_weights.pth \
-                --output_dir ./inference_results \
-                --num_samples 3 \
-                --device cpu
+# Generate P-R curve data across 19 thresholds
+python generate_pr_curve.py  # outputs test_results/pr_curve_data.csv
 ```
-
-**Advanced Usage**
-```bash
-# Custom configuration and more samples
-python infer.py --config_path ./config.yaml \
-                --checkpoint_path ./assets/ar_segmentation_weights.pth \
-                --output_dir ./custom_results \
-                --num_samples 10 \
-                --data_type valid \
-                --device cuda
-```
-
-### Parameters Reference
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--config_path` | `./config.yaml` | Path to model configuration file |
-| `--checkpoint_path` | `./assets/ar_segmentation_weights.pth` | Path to trained model weights |
-| `--output_dir` | `./inference_results` | Directory for saving results |
-| `--num_samples` | `3` | Number of samples to process and visualize |
-| `--data_type` | `test` | Dataset split to use (`test` or `valid`) |
-| `--device` | `cuda` | Computing device (`cuda` or `cpu`) |
-
-#### Output
-- **Visualizations**: Multi-panel images showing input channels, predictions, and ground truth
-- **Format**: High-resolution PNG files
-- **Naming**: `test_0.png`, `test_1.png`, etc.
-- **Location**: Specified `output_dir`
-
-
-The output ![Sample output of Surya for 2014-01-07](../../assets/ar_seg_results.png)
-## Dataset Information
-
-### Input Data
-- **Format**: SDO/AIA multi-channel solar images
-- **Shape**: (13, 4096, 4096) - 13 channels including:
-  - AIA channels: 94Å, 131Å, 171Å, 193Å, 211Å, 304Å, 335Å, 1600Å
-  - HMI channels: Magnetogram, Bx, By, Bz, Velocity
-- **Temporal coverage**: 2011-2014
-- **Cadence**: 12-minute intervals
-
-### Output Data
-- **Format**: Binary segmentation masks
-- **Shape**: (4096, 4096)
-- **Classes**: Background (0) and Active Region (1)
-
-### Data Source
-The dataset is hosted on Hugging Face: [nasa-ibm-ai4science/surya-bench-ar-segmentation](https://huggingface.co/datasets/nasa-ibm-ai4science/surya-bench-ar-segmentation)
-For more details on mask creation methodology, see [SuryaBench AR Segmentation](https://github.com/NASA-IMPACT/SuryaBench/tree/main/ar_segmentation).
-
+ 
 ## File Structure
-
+ 
 ```
 ar_segmentation/
-├── README.md                    # This file
-├── config.yaml                  # Training configuration
-├── download_data.sh            # Data download script
-├── create_ar_csv.py            # Dataset indexing script
-├── finetune.py                 # Training script
-├── infer.py                    # Inference script
-├── run_inference_example.sh    # Inference example
-├── dataset.py                  # Dataset class implementation
-├── models.py                   # Model definitions
-└── assets/                     # Data indices and downloaded data
+├── finetune.py              # Training script
+├── test.py                  # Test evaluation (macro + micro metrics)
+├── dataset.py               # Dataset class (zarr input + h5 masks)
+├── models.py                # Model definitions (SpectFormer, UNet, MobileNet, ChannelAdapter)
+├── infer.py                 # Inference visualization
+├── visualize.py             # Visualization utilities
+├── create_ar_csv.py         # Dataset index generation
+├── config*.yaml             # Training configurations
+├── run_*.sh                 # Slurm job scripts
+├── test_results/            # Per-sample CSVs, P-R curve data, plots
+│   ├── lora_bce.csv
+│   ├── mobilenet_scratch.csv
+│   ├── pr_curve_data.csv
+│   └── pr_curve_and_iou.png
+├── test_preds/              # Raw sigmoid predictions (.npy, float16)
+│   ├── lora_bce/
+│   ├── mobilenet_scratch/
+│   └── ...
+├── best_checkpoints/        # Best model weights
+│   ├── lora_bce_epoch_31.pth
+│   ├── mobilenet_imagenet_epoch_14.pth
+│   ├── mobilenet_scratch_epoch_13.pth
+│   └── hmi_only_epoch_14.pth
+└── assets/
+    ├── surya.366m.v1.pt     # Surya pretrained weights
+    ├── scalers.yaml         # Channel normalization parameters
+    └── surya-bench-ar-segmentation/
+        ├── data/            # AR masks (h5 files)
+        ├── train.csv
+        ├── validation.csv
+        └── test.csv
 ```
-
-## Pre-trained Models
-
-Pre-trained weights are available on Hugging Face:
-- **Repository**: [models/nasa-ibm-ai4science/ar_segmentation_surya](https://huggingface.co/nasa-ibm-ai4science/ar_segmentation_surya)
-- **Model Type**: SpectFormer with LoRA adapters
-
-### Custom Dataset
-To use your own AR masks:
-
-1. Organize masks in the expected directory structure
-2. Update the CSV files with your data paths
-3. Modify `config.yaml` to point to your indices
